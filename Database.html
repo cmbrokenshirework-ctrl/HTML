@@ -2,12 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<script src="https://unpkg.com/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.11/pdfmake.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.11/vfs_fonts.js"></script>
 <!-- html2pdf.js library and its dependencies -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
 
@@ -35,6 +30,11 @@
 
     /* Misc */
     --radius:14px;
+    
+    /* Confidence colors */
+    --ok:#22c55e;    /* high  */
+    --warn:#eab308;  /* medium*/
+    --bad:#ef4444;   /* low   */
   }
   html,body{
     background:var(--bg); color:var(--white); margin:0;
@@ -165,13 +165,6 @@
     .answer-details{ margin-left: 24px }
     .question-row{ margin-left: 12px }
     .group{ margin-left: 14px; padding-left: 12px }
-  }
-  :root{
-    --ok:#22c55e;    /* high  */
-    --warn:#eab308;  /* medium*/
-    --bad:#ef4444;   /* low   */
-  }
-
   /* Color the collapsed header by confidence */
   .answer-details.conf-high  > summary{
     border-color: rgba(34,197,94,.65);
@@ -327,7 +320,6 @@
   color: #f8fafc;
 }
 
-/* ===== Search tab ===== */
 /* ===== Search tab ===== */
 #search{ padding: 10px 0 60px; }
 .search-bar{
@@ -565,8 +557,6 @@ header { display:flex; flex-wrap:wrap; } /* already present, but safe to keep */
 </style>
 <!-- ========== REGION: HEAD/STYLES ========== -->
 
-<!-- ========== REGION: HEADER/UI ========== -->
-
 </head>
 <body>
 
@@ -601,22 +591,11 @@ header { display:flex; flex-wrap:wrap; } /* already present, but safe to keep */
     
 
 
-    <button id="downloadHtmlBtn">Download HTML copy</button>
-    <button id="downloadJsonBtn">Download JSON</button>
-    <!-- Merge controls -->
-    
-    <!-- === Chat-assisted workflow === -->
-    <button id="exportSchemaBtn">Show Tree JSON for Chat</button>
-    <button id="ingestChatBtn">Chat-GPT JSON</button>
-    <input id="ingestChatFile" type="file" accept="application/json" style="display:none" />
-
-    <button id="resetTreeBtn">Reset Tree</button>
-
-
-
-
     <div class="spacer"></div>
   </header>
+
+  <!-- Keep the hidden file input for chat functionality -->
+  <input id="ingestChatFile" type="file" accept="application/json" style="display:none" />
 
   <!-- ========== REGION: HEADER/UI ========== -->
 
@@ -707,9 +686,6 @@ header { display:flex; flex-wrap:wrap; } /* already present, but safe to keep */
   const downloadJsonBtn = document.getElementById('downloadJsonBtn');
 
 
-/* ===== Company-specific framework (personalized to John Deere, Kioti, or Kubota) ===== */
-
-/* ===== INITIAL TEMPLATE (build frameworks for the three named companies) ===== */
 /* ===== Company-specific framework (personalized to John Deere, Kioti, or Kubota) ===== */
 
 /* ===== 1) Your implicit tree (allowed [company, topic, question]) ===== */
@@ -1064,7 +1040,7 @@ function openSelectiveJsonDashboard(){
 /* ===== Export Scope (Step 2: company → topic → KIQ) ===== */
 const EXPORT_SCOPE_PATHS_KEY = "export.scope.paths.v2"; // persists exact [company,topic,question] paths
 
-function ptKey(pt){ return JSON.stringify(pt); } // stable key
+function pathKey(pt){ return JSON.stringify(pt); } // stable key
 function loadSavedPathsOrAll(){
   try{
     const raw = localStorage.getItem(EXPORT_SCOPE_PATHS_KEY);
@@ -1106,7 +1082,7 @@ function openExportScope(kind /* 'one' | 'two' */){
 
   // Build initial selection set
   const saved = loadSavedPathsOrAll();
-  const selected = new Set((saved||[]).map(ptKey));
+  const selected = new Set((saved||[]).map(pathKey));
 
   // Build the UI tree
   tree.innerHTML = '';
@@ -1147,7 +1123,7 @@ function openExportScope(kind /* 'one' | 'two' */){
           id, type:'checkbox',
           'data-level':'kiq',
           'data-pt': JSON.stringify(pt),
-          checked: selected.has(ptKey(pt))
+          checked: selected.has(pathKey(pt))
         });
         const lbl = el('label', { for:id, style:'display:flex; gap:8px; align-items:flex-start; cursor:pointer' },
           leaf,
@@ -4061,17 +4037,13 @@ function showSearchTab(){
 
 
 /* =========================================================================
-   DROP-IN: replace buildSearchIndex() entirely
-   - Indexes subject/text/source/directQuote + tag tokens
+   DROP-IN REPLACEMENT: buildSearchIndex()
+   - Indexes subject/text/source/directQuote + tag tokens  
    - Adds coverageGrade (A–F) and "cov:<LETTER>" tag
+   - ALSO indexes a "KIQ stub" doc (aidx = -1) for any parent/child KIQ
+     that currently has no saved answers, so searches match question text
    - Produces per-field term frequencies, document frequencies, and avg field lens
    - Safe for parent/child questions; skips __ephemeral answers
-   ========================================================================= */
-  /* =========================================================================
-   DROP-IN REPLACEMENT: buildSearchIndex()
-   - Indexes answers as before
-   - ALSO indexes a "KIQ stub" doc (aidx = -1) for any parent/child KIQ
-     that currently has no saved answers, so searches match question text.
    ========================================================================= */
 
 
@@ -4260,19 +4232,6 @@ function refreshSearchIfVisible(){
 
 
    
-/* small priors (unchanged idea) */
-function recencyBoost(isoDate){
-  if (!isoDate) return 0;
-  const d = new Date(isoDate);
-  if (Number.isNaN(+d)) return 0;
-  const now = new Date();
-  const months = (now.getFullYear()-d.getFullYear())*12 + (now.getMonth()-d.getMonth());
-  const decay = Math.exp(-Math.max(0, months) / 9);
-  return 0.6 * decay;
-}
-function confidenceBoost(level){ return level==='high' ? 0.6 : level==='medium' ? 0.3 : level==='low' ? 0.1 : 0; }
-function sourceTypeBoost(st){ return st==='primary' ? 0.35 : st==='client data' ? 0.3 : st==='secondary' ? 0.15 : 0; }
-
 function parseLLM(text){
   // strip code fences if user pasted them
   const cleaned = String(text).replace(/^```[a-z]*\n?|\n?```$/g, "");
@@ -4486,21 +4445,9 @@ function esc(s){
 
 
 
-// ===============================
-// FINAL: bulletproof PDF exporter
-// ===============================
-
-/* =============================================================================
-   Competitive Answers — HTML Renderer
-============================================================================= */
-
-/* ────────────────────────────────────────────────────────────────────────────
-   Public entry: build sections, render HTML, wire behaviors
-   ──────────────────────────────────────────────────────────────────────────── */
-
-// ===============================
-// FINAL: unified HTML + PDF export
-// ===============================
+/* ============================================================================
+   KIOTI and KUBOTA JSON Database — Adobe-friendly standalone HTML exporter
+   ============================================================================ */
 
 /* ────────────────────────────────────────────────────────────────────────────
    Public entry: build sections, render HTML, wire behaviors
